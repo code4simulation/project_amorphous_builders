@@ -1,0 +1,26 @@
+mode: "train"  # or "generate"
+
+data:
+  file_path: "data/amorphous_structures.extxyz"
+  graph_cutoff: 5.0  # cutoff distance (Å)
+  target_properties: ["rdf"] 
+
+# mode: train
+train:
+  batch_size: 32
+  num_epochs: 1000
+  learning_rate: 1e-4
+  noise_schedule: "cosine"  # or "linear"
+  timesteps: 1000
+
+# mode: generate
+generate:
+  num_structures: 10
+  lattice_vector: [[10.0,  0.0,  0.0],
+                   [ 0.0, 10.0,  0.0],
+                   [ 0.0,  0.0, 10.0]]
+  density: 2.2  # g/cm³
+  chemical_formula: "SiO2"
+  num_atoms: 120
+  target_rdf: "target_rdf.npy"  # Conditional RDF data (numpy format)
+  output_format: "extxyz"
