@@ -57,15 +57,18 @@ def atoms_to_graph(
     try:
         # 노드 특징 추출
         node_attrs = []
+        atomic_numbers = None
+        
         for feature in node_features:
             if feature == 'atomic_number':
-                node_attrs.append(torch.tensor(atoms.get_atomic_numbers(), dtype=torch.float))
+                # 원자 번호를 별도로 저장 (임베딩 레이어에서 사용)
+                atomic_numbers = torch.tensor(atoms.get_atomic_numbers(), dtype=torch.long)
             elif feature == 'positions':
                 node_attrs.append(torch.tensor(atoms.positions, dtype=torch.float))
             # 추가 특징들 확장 가능
         
-        # 노드 특징 결합
-        x = torch.stack(node_attrs, dim=1) if len(node_attrs) > 1 else node_attrs[0]
+        # 노드 특징 결합 (positions만 사용)
+        x = torch.cat(node_attrs, dim=1) if len(node_attrs) > 1 else node_attrs[0]
         
         # 에지 인덱스 및 속성 계산
         positions = atoms.positions
@@ -89,12 +92,17 @@ def atoms_to_graph(
             num_nodes=num_atoms
         )
         
+        # 원자 번호를 그래프 데이터에 추가
+        if atomic_numbers is not None:
+            graph_data.atomic_numbers = atomic_numbers
+        
         logger.debug(f"그래프 변환 완료: {num_atoms}개 원자, {edge_index.shape[1]}개 에지")
         return graph_data
         
     except Exception as e:
         logger.error(f"그래프 변환 중 오류 발생: {str(e)}")
         raise
+
 
 def batch_structures_to_graphs(
     structures: List[Atoms], 
