@@ -9,10 +9,11 @@ import os
 import yaml
 from datetime import datetime
 from typing import Dict, Any, Tuple
-from utils.config import load_config, Config
+
 from data.loader import load_extxyz, batch_structures_to_graphs
 from data.preprocessing import batch_calculate_rdf, normalize_rdf
 from data.dataset import create_dataset_from_structures, AmorphousDataset
+from utils.config import load_config, Config
 
 # 로깅 설정
 logging.basicConfig(
@@ -25,9 +26,7 @@ logging.basicConfig(
 )
 logger = logging.getLogger(__name__)
 
-class Trainer:
-    """Diffusion 모델 학습 클래스"""
-    
+class Trainer:  
     def __init__(self, config: Dict[str, Any]):
         self.config = config
         self.device = self.config.get('training.device')
@@ -50,15 +49,14 @@ class Trainer:
         logger.info(f"Trainer 초기화 완료: device={self.device}")
     
     def _setup_model(self):
-        """모델 및 옵티마이저 설정"""
         from model.graph_network import ConditionalGraphNetwork
         from model.diffusion import DiffusionProcess
         
         # Diffusion 프로세스 초기화
         diffusion_config = self.config.get('diffusion')
         self.diffusion = DiffusionProcess(
-            beta_start=diffusion_config['beta_start'],
-            beta_end=diffusion_config['beta_end'],
+            beta_start=float(diffusion_config['beta_start']),
+            beta_end=float(diffusion_config['beta_end']),
             num_timesteps=diffusion_config['num_timesteps'],
             schedule=diffusion_config['schedule']
         )
@@ -77,8 +75,8 @@ class Trainer:
         training_config = self.config.get('training')
         self.optimizer = optim.Adam(
             self.model.parameters(),
-            lr=training_config['learning_rate'],
-            weight_decay=training_config['weight_decay']
+            lr = float(training_config['learning_rate']),
+            weight_decay= float(training_config['weight_decay'])
         )
         
         self.scheduler = optim.lr_scheduler.StepLR(
@@ -94,27 +92,22 @@ class Trainer:
         logger.info(f"모델 설정 완료: 파라미터 수 {sum(p.numel() for p in self.model.parameters()):,}")
     
     def train_epoch(self, train_loader: DataLoader) -> float:
-        """한 에폭 동안 학습"""
         self.model.train()
         total_loss = 0.0
         num_batches = len(train_loader)
         
         for batch_idx, data in enumerate(train_loader):
-            # 데이터를 device로 이동
             data = data.to(self.device)
             
-            # 랜덤 타임스텝 샘플링
             t = torch.randint(
                 0, self.diffusion.num_timesteps, (data.num_graphs,), 
                 device=self.device
             ).long()
             
-            # Forward diffusion (노이즈 추가)
             noisy_positions, noise = self.diffusion.forward_diffusion(
                 data.pos, t, noise=None
             )
-            
-            # 모델 예측
+
             self.optimizer.zero_grad()
             predicted_noise = self.model(
                 x=noisy_positions,
@@ -124,22 +117,17 @@ class Trainer:
                 condition=data.rdf
             )
             
-            # 손실 계산 (MSE between predicted and actual noise)
             loss = F.mse_loss(predicted_noise, noise)
-            
-            # 역전파
             loss.backward()
             torch.nn.utils.clip_grad_norm_(self.model.parameters(), 1.0)
             self.optimizer.step()
             
-            # 통계 업데이트
             total_loss += loss.item()
             
             if batch_idx % self.config.get('training.log_interval') == 0:
                 logger.info(f"Epoch {self.current_epoch} [{batch_idx}/{num_batches}] "
                            f"Loss: {loss.item():.6f}")
                 
-                # TensorBoard에 기록
                 step = self.current_epoch * num_batches + batch_idx
                 self.writer.add_scalar('train/loss', loss.item(), step)
                 self.writer.add_scalar('train/lr', self.optimizer.param_groups[0]['lr'], step)
@@ -147,7 +135,6 @@ class Trainer:
         return total_loss / num_batches
     
     def validate(self, val_loader: DataLoader) -> float:
-        """검증 데이터로 모델 평가"""
         self.model.eval()
         total_loss = 0.0
         num_batches = len(val_loader)
@@ -156,18 +143,15 @@ class Trainer:
             for data in val_loader:
                 data = data.to(self.device)
                 
-                # 랜덤 타임스텝 샘플링
                 t = torch.randint(
                     0, self.diffusion.num_timesteps, (data.num_graphs,), 
                     device=self.device
                 ).long()
                 
-                # Forward diffusion
                 noisy_positions, noise = self.diffusion.forward_diffusion(
                     data.pos, t, noise=None
                 )
-                
-                # 모델 예측
+
                 predicted_noise = self.model(
                     x=noisy_positions,
                     edge_index=data.edge_index,
@@ -175,8 +159,7 @@ class Trainer:
                     t=t,
                     condition=data.rdf
                 )
-                
-                # 손실 계산
+
                 loss = F.mse_loss(predicted_noise, noise)
                 total_loss += loss.item()
         
@@ -193,14 +176,12 @@ class Trainer:
             'config': self.config
         }
         
-        # 일반 체크포인트
         checkpoint_path = os.path.join(
             self.output_dir, 
             f'checkpoint_epoch_{self.current_epoch}.pt'
         )
         torch.save(checkpoint, checkpoint_path)
         
-        # 최고 성능 체크포인트
         if is_best:
             best_path = os.path.join(self.output_dir, 'best_model.pt')
             torch.save(checkpoint, best_path)
@@ -223,7 +204,7 @@ class Trainer:
     
     def train(self, train_loader: DataLoader, val_loader: DataLoader = None):
         """전체 학습 프로세스"""
-        training_config = self.config['training']
+        training_config = self.config.get('training')
         num_epochs = training_config['num_epochs']
         
         logger.info(f"학습 시작: 총 {num_epochs} 에폭")
@@ -287,33 +268,40 @@ def main():
         dataset.save(dataset_path)
         print(f"Preprocessing complete: saved to {dataset_path}")
         return
-    """
-    # 데이터셋 로드
-    from data.dataset import AmorphousDataset
-    from torch_geometric.loader import DataLoader
-    
-    dataset = AmorphousDataset.load(config.get('data.dataset_path'))
-    
-    # 데이터 로더 생성
-    train_loader = DataLoader(
+
+    elif mode == 'train':
+        from data.dataset import AmorphousDataset
+        from torch_geometric.loader import DataLoader
+
+        dataset = AmorphousDataset.load(config.get('data.dataset_path'))
+        train_loader = DataLoader(
         dataset, 
         batch_size=config.get('training.batch_size'),
         shuffle=False,
-    )
-    
-    # 검증 데이터 로더 (있는 경우)
-    val_loader = None
-    if 'val_dataset_path' in config['data']:
-        val_dataset = AmorphousDataset.load(config.get('data.val_dataset_path'))
-        val_loader = DataLoader(
-            val_dataset,
-            batch_size=config.get('training.batch_size'),
-            shuffle=False,
         )
-    
-    # 학습기 생성 및 학습 실행
-    trainer = Trainer(config)
-    trainer.train(train_loader, val_loader)
-    """
+     
+        # 검증 데이터 로더 (있는 경우)
+        val_loader = None
+        if 'val_dataset_path' in config.get('data'):
+            val_dataset = AmorphousDataset.load(config.get('data.val_dataset_path'))
+            val_loader = DataLoader(
+                val_dataset,
+                batch_size=config.get('training.batch_size'),
+                shuffle=False,
+            )
+
+        # 학습기 생성 및 학습 실행
+        trainer = Trainer(config)
+        trainer.train(train_loader, val_loader)
+
+    elif mode == 'generate':
+        dataset_path = config.get('data.dataset_path')
+        dataset = AmorphousDataset.load(dataset_path)
+        # ...이하 생성 코드...
+
+    else:
+        raise ValueError(f"Unknown mode: {mode}")
+
+
 if __name__ == "__main__":
     main()
