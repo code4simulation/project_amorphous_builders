@@ -1,4 +1,4 @@
-from .graph_network import ConditionalGraphNetwork, EdgeCov
+from .graph_network import ConditionalGraphNetwork, EdgeConv
 from .diffusion import DiffusionProcess
 
 __all__ = [
