@@ -1,0 +1,4 @@
+mode: preprocess
+data:
+  extxyz_path: "amorphous.extxyz"
+  dataset_path: "amorphous_dataset.pt"
