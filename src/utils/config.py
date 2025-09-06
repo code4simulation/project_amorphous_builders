@@ -35,7 +35,7 @@ class Config:
         except Exception as e:
             logger.error(f"설정 파일 로드 실패: {e}")
             raise
-    
+        
     def get(self, key: str, default: Any = None) -> Any:
         """설정 값 조회 (점 표기법 지원: 'data.train_data_path')"""
         keys = key.split('.')
@@ -52,48 +52,39 @@ class Config:
             return default
     
     def validate(self) -> bool:
-        """필수 설정 값 검증"""
-        required_keys = [
-            'mode',
-            'data.train_data_path',
-            'model.node_dim',
-            'model.hidden_dim',
-            'training.device',
-            'training.batch_size',
-            'training.num_epochs'
-        ]
-        
+        required_keys = []
+        mode = self.get('mode')
+        if mode == 'train':
+            required_keys = [
+                'mode',
+                'data.dataset_path',
+                'model.node_dim',
+                'model.hidden_dim',
+                'training.device',
+                'training.batch_size',
+                'training.num_epochs'
+            ]
+        elif mode == 'generate':
+            required_keys = [
+                'mode',
+                'data.dataset_path',
+                'model.node_dim',
+                'model.hidden_dim',
+                'training.device'
+            ]
+        elif mode == 'preprocess':
+            required_keys = [
+                'mode',
+                'data.extxyz_path',
+                'data.dataset_path'
+            ]
         missing_keys = []
         for key in required_keys:
             if self.get(key) is None:
                 missing_keys.append(key)
-        
         if missing_keys:
             logger.error(f"필수 설정 값이 누락되었습니다: {missing_keys}")
             return False
-        
-        # 모드별 추가 검증
-        mode = self.get('mode')
-        if mode == 'train':
-            # 학습 모드 검증
-            pass
-        elif mode == 'generate':
-            # 생성 모드 검증
-            gen_required = [
-                'generation.lattice_vector',
-                'generation.density',
-                'generation.chemical_formula',
-                'generation.num_atoms',
-                'generation.target_rdf'
-            ]
-            for key in gen_required:
-                if self.get(key) is None:
-                    missing_keys.append(key)
-            
-            if missing_keys:
-                logger.error(f"생성 모드 필수 설정 값이 누락되었습니다: {missing_keys}")
-                return False
-        
         logger.info("설정 검증 완료")
         return True
     
