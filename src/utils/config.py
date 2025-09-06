@@ -23,16 +23,17 @@ class Config:
         self._load_config()
     
     def _load_config(self):
-        """YAML 설정 파일 로드"""
         try:
-            with open(self.config_path, 'r') as f:
-                self.config = yaml.safe_load(f)
+            # utf-8 우선, 실패시 cp949 fallback
+            try:
+                with open(self.config_path, 'r', encoding='utf-8') as f:
+                    self.config = yaml.safe_load(f)
+            except UnicodeDecodeError:
+                with open(self.config_path, 'r', encoding='cp949') as f:
+                    self.config = yaml.safe_load(f)
             logger.info(f"설정 파일 로드 완료: {self.config_path}")
-        except FileNotFoundError:
-            logger.error(f"설정 파일을 찾을 수 없습니다: {self.config_path}")
-            raise
-        except yaml.YAMLError as e:
-            logger.error(f"YAML 파싱 오류: {e}")
+        except Exception as e:
+            logger.error(f"설정 파일 로드 실패: {e}")
             raise
     
     def get(self, key: str, default: Any = None) -> Any:
