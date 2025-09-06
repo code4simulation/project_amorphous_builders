@@ -22,6 +22,7 @@
 src/main.py 를 통해 input.yaml의 파라미터를 기준으로 프로그램을 실행하는 커맨드 예시까지 알려줘.
 
 # Schematic Code Archtecture
+```
 project_amorphous_builders/
 │
 ├── examples/
@@ -51,7 +52,7 @@ project_amorphous_builders/
 │   │   └── visualization.py   # 결과 시각화: 원자 구조 plot, 학습 곡선, 샘플 이미지 등.
 │
 └── ...
-
+```
 # 파일별 흐름과 함수/변수 연결 코멘트
 1. main.py
 전체 파이프라인 제어.
