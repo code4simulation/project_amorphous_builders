@@ -278,6 +278,7 @@ def main():
         dataset, 
         batch_size=config.get('training.batch_size'),
         shuffle=False,
+        #num_workers=int(config.get('training.num_workers'))
         )
      
         # 검증 데이터 로더 (있는 경우)
