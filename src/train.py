@@ -52,7 +52,7 @@ class Trainer:
         from model.diffusion import DiffusionProcess
         
         # Diffusion 프로세스 초기화
-        diffusion_config = self.config['diffusion']
+        diffusion_config = self.config.get('diffusion')
         self.diffusion = DiffusionProcess(
             beta_start=diffusion_config['beta_start'],
             beta_end=diffusion_config['beta_end'],
@@ -61,7 +61,7 @@ class Trainer:
         )
         
         # 그래프 네트워크 초기화
-        model_config = self.config['model']
+        model_config = self.config.get('model')
         self.model = ConditionalGraphNetwork(
             node_dim=model_config['node_dim'],
             edge_dim=model_config['edge_dim'],
@@ -71,7 +71,7 @@ class Trainer:
         ).to(self.device)
         
         # 옵티마이저 및 스케줄러 설정
-        training_config = self.config['training']
+        training_config = self.config.get('training')
         self.optimizer = optim.Adam(
             self.model.parameters(),
             lr=training_config['learning_rate'],
@@ -132,7 +132,7 @@ class Trainer:
             # 통계 업데이트
             total_loss += loss.item()
             
-            if batch_idx % self.config['training']['log_interval'] == 0:
+            if batch_idx % self.config.get('training.log_interval') == 0:
                 logger.info(f"Epoch {self.current_epoch} [{batch_idx}/{num_batches}] "
                            f"Loss: {loss.item():.6f}")
                 
@@ -262,7 +262,7 @@ def main():
     from data.dataset import AmorphousDataset
     from torch_geometric.loader import DataLoader
     
-    dataset = AmorphousDataset.load(config['data']['dataset_path'])
+    dataset = AmorphousDataset.load(config.get('data.dataset_path'))
     
     # 데이터 로더 생성
     train_loader = DataLoader(
@@ -274,7 +274,7 @@ def main():
     # 검증 데이터 로더 (있는 경우)
     val_loader = None
     if 'val_dataset_path' in config['data']:
-        val_dataset = AmorphousDataset.load(config['data']['val_dataset_path'])
+        val_dataset = AmorphousDataset.load(config.get('data.val_dataset_path'))
         val_loader = DataLoader(
             val_dataset,
             batch_size=config.get('training.batch_size'),
