@@ -6,7 +6,6 @@ import numpy as np
 from typing import List, Optional, Tuple, Dict, Any
 import os
 
-# 로깅 설정
 logging.basicConfig(
     level=logging.INFO,
     format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
@@ -18,8 +17,6 @@ logging.basicConfig(
 logger = logging.getLogger(__name__)
 
 class AmorphousDataset(Dataset):
-    """비정질 구조 데이터셋 클래스"""
-    
     def __init__(
         self, 
         graphs: List[Data],
@@ -29,44 +26,26 @@ class AmorphousDataset(Dataset):
         self.graphs = graphs
         self.rdf_features = rdf_features
         self.metadata = metadata or {}
-        
-        # 데이터 검증
         self._validate_data()
-        
         logger.info(f"데이터셋 초기화 완료: {len(self)}개 샘플")
-    
+
     def _validate_data(self):
-        """데이터 무결성 검증"""
         if len(self.graphs) == 0:
             raise ValueError("빈 그래프 리스트")
-            
         if self.rdf_features is not None and len(self.graphs) != len(self.rdf_features):
-            raise ValueError("그래프와 RDF 특징의 개수가 일치하지 않습니다")
-        
+            raise ValueError("그래프와 RDF 특성의 개수가 일치하지 않습니다")
         logger.info("데이터 검증 완료")
     
     def __len__(self) -> int:
         return len(self.graphs)
     
-    def __getitem__(self, idx: int) -> Dict[str, Any]:
-        """인덱스에 해당하는 샘플 반환"""
+    def __getitem__(self, idx: int) -> Data:
         graph = self.graphs[idx]
-        
-        sample = {
-            'x': graph.x,
-            'edge_index': graph.edge_index,
-            'edge_attr': graph.edge_attr,
-            'pos': graph.pos,
-            'num_nodes': graph.num_nodes,
-            'atomic_numbers': getattr(graph, 'atomic_numbers', None)
-        }
-        
-        # RDF 특징 추가 (있는 경우)
+        # RDF feature를 Data 객체에 직접 추가
         if self.rdf_features is not None:
-            sample['rdf'] = torch.tensor(self.rdf_features[idx], dtype=torch.float)
-        
-        return sample
-    
+            graph.rdf = torch.tensor(self.rdf_features[idx], dtype=torch.float)
+        return graph
+
     def save(self, path: str):
         try:
             save_data = {
@@ -76,54 +55,25 @@ class AmorphousDataset(Dataset):
             }
             os.makedirs(os.path.dirname(os.path.abspath(path)), exist_ok=True)
             torch.save(save_data, path)
-            logger.info(f"데이터셋 저장 완료: {path}")       
+            logger.info(f"데이터셋 저장 완료: {path}")
         except Exception as e:
             logger.error(f"데이터셋 저장 중 오류 발생: {str(e)}")
             raise
-    
+
     @classmethod
     def load(cls, path: str) -> 'AmorphousDataset':
-        """파일에서 데이터셋 로드"""
         try:
-            # 데이터 로드
             save_data = torch.load(path)
-            
-            # 데이터셋 인스턴스 생성
             dataset = cls(
                 graphs=save_data['graphs'],
                 rdf_features=save_data.get('rdf_features'),
                 metadata=save_data.get('metadata', {})
             )
-            
             logger.info(f"데이터셋 로드 완료: {path}, {len(dataset)}개 샘플")
             return dataset
-            
         except Exception as e:
             logger.error(f"데이터셋 로드 중 오류 발생: {str(e)}")
             raise
-    
-    def get_stats(self) -> Dict[str, Any]:
-        """데이터셋 통계 정보 반환"""
-        num_nodes = [graph.num_nodes for graph in self.graphs]
-        num_edges = [graph.edge_index.shape[1] for graph in self.graphs]
-        
-        stats = {
-            'num_samples': len(self),
-            'avg_nodes': np.mean(num_nodes),
-            'min_nodes': np.min(num_nodes),
-            'max_nodes': np.max(num_nodes),
-            'avg_edges': np.mean(num_edges),
-            'min_edges': np.min(num_edges),
-            'max_edges': np.max(num_edges),
-        }
-        
-        # RDF 통계 (있는 경우)
-        if self.rdf_features is not None:
-            stats['rdf_shape'] = self.rdf_features.shape
-            stats['rdf_mean'] = np.mean(self.rdf_features)
-            stats['rdf_std'] = np.std(self.rdf_features)
-        
-        return stats
 
 def create_dataset_from_structures(
     structures: List[Any],
