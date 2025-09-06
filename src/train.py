@@ -9,6 +9,7 @@ import os
 import yaml
 from datetime import datetime
 from typing import Dict, Any, Tuple
+from utils.config import load_config, Config
 
 # 로깅 설정
 logging.basicConfig(
@@ -26,10 +27,11 @@ class Trainer:
     
     def __init__(self, config: Dict[str, Any]):
         self.config = config
-        self.device = torch.device(config['training']['device'])
+        self.device = self.config.get('training.device')
         
         # 출력 디렉토리 설정
-        self.output_dir = config['training']['output_dir']
+        self.output_dir = self.config.get('training.output_dir')
+        self.device = self.config.get('training.device')
         os.makedirs(self.output_dir, exist_ok=True)
         
         # TensorBoard writer
@@ -251,12 +253,6 @@ class Trainer:
         logger.info("학습 완료!")
         self.writer.close()
 
-def load_config(config_path: str) -> Dict[str, Any]:
-    """YAML 설정 파일 로드"""
-    with open(config_path, 'r') as f:
-        config = yaml.safe_load(f)
-    return config
-
 def main():
     """메인 학습 함수"""
     # 설정 파일 로드
@@ -271,9 +267,8 @@ def main():
     # 데이터 로더 생성
     train_loader = DataLoader(
         dataset, 
-        batch_size=config['training']['batch_size'],
-        shuffle=True,
-        num_workers=config['training']['num_workers']
+        batch_size=config.get('training.batch_size'),
+        shuffle=False,
     )
     
     # 검증 데이터 로더 (있는 경우)
@@ -282,9 +277,8 @@ def main():
         val_dataset = AmorphousDataset.load(config['data']['val_dataset_path'])
         val_loader = DataLoader(
             val_dataset,
-            batch_size=config['training']['batch_size'],
+            batch_size=config.get('training.batch_size'),
             shuffle=False,
-            num_workers=config['training']['num_workers']
         )
     
     # 학습기 생성 및 학습 실행
