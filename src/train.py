@@ -10,6 +10,9 @@ import yaml
 from datetime import datetime
 from typing import Dict, Any, Tuple
 from utils.config import load_config, Config
+from data.loader import load_extxyz, batch_structures_to_graphs
+from data.preprocessing import batch_calculate_rdf, normalize_rdf
+from data.dataset import create_dataset_from_structures, AmorphousDataset
 
 # 로깅 설정
 logging.basicConfig(
@@ -257,7 +260,34 @@ def main():
     """메인 학습 함수"""
     # 설정 파일 로드
     config = load_config('input.yaml')
+    mode = config.get('mode')
+
+    if not config.validate():
+        raise RuntimeError("Config validation failed")
     
+    if mode == 'preprocess':
+        extxyz_path = config.get('data.extxyz_path')
+        dataset_path = config.get('data.dataset_path')
+        graph_cutoff = config.get('data.graph_cutoff', 5.0)
+        r_max = config.get('data.r_max', 10.0)
+        n_bins = config.get('data.n_bins', 100)
+        normalize_rdf = config.get('data.normalize_rdf', True)
+
+        # 1. extxyz 파일 로드
+        structures = load_extxyz(extxyz_path)
+        # 2. 그래프/특징 추출
+        dataset = create_dataset_from_structures(
+            structures,
+            graph_cutoff=graph_cutoff,
+            r_max=r_max,
+            n_bins=n_bins,
+            normalize_rdf=normalize_rdf
+        )
+        # 3. pt 파일로 저장
+        dataset.save(dataset_path)
+        print(f"Preprocessing complete: saved to {dataset_path}")
+        return
+    """
     # 데이터셋 로드
     from data.dataset import AmorphousDataset
     from torch_geometric.loader import DataLoader
@@ -284,6 +314,6 @@ def main():
     # 학습기 생성 및 학습 실행
     trainer = Trainer(config)
     trainer.train(train_loader, val_loader)
-
+    """
 if __name__ == "__main__":
     main()
