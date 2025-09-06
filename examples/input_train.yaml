@@ -7,7 +7,6 @@ data:
   n_bins: 100                # RDF 히스토그램 bin 개수
   normalize_rdf: true        # RDF 정규화 여부
 
-# 모델 설정
 model:
   node_dim: 3                # 노드 특징 차원 (x, y, z 좌표)
   edge_dim: 1                # 에지 특징 차원 (거리)
@@ -15,14 +14,12 @@ model:
   num_layers: 6              # 그래프 컨볼루션 레이어 수
   condition_dim: 100         # 조건(RDF) 특징 차원
 
-# Diffusion 프로세스 설정
 diffusion:
-  beta_start: 0.0001         # β 시작값
+  beta_start: 0.0001           # β 시작값
   beta_end: 0.02             # β 종료값
   num_timesteps: 1000        # Diffusion 스텝 수
   schedule: "linear"         # β 스케줄 (linear 또는 cosine)
 
-# 학습 설정
 training:
   device: "cpu"             # 사용할 디바이스 (cuda 또는 cpu)
   batch_size: 32             # 배치 크기
@@ -37,3 +34,4 @@ training:
   checkpoint_interval: 10    # 체크포인트 저장 간격 (에폭 수)
   log_interval: 10           # 로그 출력 간격 (배치 수)
   resume_from_checkpoint: null  # 재개할 체크포인트 경로 (없으면 null)
+  num_workers: 2          # 데이터 로더 워커 수
