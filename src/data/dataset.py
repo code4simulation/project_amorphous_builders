@@ -68,22 +68,15 @@ class AmorphousDataset(Dataset):
         return sample
     
     def save(self, path: str):
-        """데이터셋을 파일로 저장"""
         try:
-            # 저장할 데이터 준비
             save_data = {
                 'graphs': self.graphs,
                 'rdf_features': self.rdf_features,
                 'metadata': self.metadata
             }
-            
-            # 디렉토리 생성 (없는 경우)
             os.makedirs(os.path.dirname(os.path.abspath(path)), exist_ok=True)
-            
-            # 데이터 저장
             torch.save(save_data, path)
-            logger.info(f"데이터셋 저장 완료: {path}")
-            
+            logger.info(f"데이터셋 저장 완료: {path}")       
         except Exception as e:
             logger.error(f"데이터셋 저장 중 오류 발생: {str(e)}")
             raise
