@@ -18,8 +18,6 @@ logging.basicConfig(
 logger = logging.getLogger(__name__)
 
 class EdgeConv(MessagePassing):
-    """에지 컨볼루션 레이어"""
-    
     def __init__(self, in_channels: int, out_channels: int):
         super(EdgeConv, self).__init__(aggr='mean')
         self.mlp = nn.Sequential(
@@ -105,11 +103,15 @@ class ConditionalGraphNetwork(nn.Module):
         Returns:
             예측된 노이즈 [N, node_dim]
         """
+
+        if t.dtype != torch.float32:
+            t = t.float()
+
         # 조건 특징 인코딩
         condition_features = self.condition_mlp(condition)  # [hidden_dim]
         
         # 시간 특징 인코딩
-        time_features = self.time_mlp(t.view(-1, 1))  # [hidden_dim]
+        time_features = self.time_mlp(t.view(-1, 1))  # [batch_size, hidden_dim]
         
         # 노드 특징 인코딩
         h = self.node_encoder(x)  # [N, hidden_dim]
