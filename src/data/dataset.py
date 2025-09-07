@@ -41,7 +41,9 @@ class AmorphousDataset(Dataset):
     
     def __getitem__(self, idx: int) -> Data:
         graph = self.graphs[idx]
-        # RDF feature를 Data 객체에 직접 추가
+        if not hasattr(graph, 'pos') or graph.pos is None:
+            logger.error(f"샘플 {idx}에서 pos 필드가 None입니다. 데이터 생성/저장/로드 과정을 점검하세요.")
+            raise ValueError(f"샘플 {idx}의 pos가 None입니다.")
         if self.rdf_features is not None:
             graph.rdf = torch.tensor(self.rdf_features[idx], dtype=torch.float)
         return graph
