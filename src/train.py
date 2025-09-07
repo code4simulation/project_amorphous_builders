@@ -97,6 +97,10 @@ class Trainer:
         num_batches = len(train_loader)
         
         for batch_idx, data in enumerate(train_loader):
+            if not hasattr(data, 'pos') or data.pos is None:
+                logger.error(f"배치 {batch_idx}에서 pos가 None입니다. 데이터셋을 점검하세요.")
+                continue  # 또는 raise ValueError
+            
             data = data.to(self.device)
             
             t = torch.randint(
