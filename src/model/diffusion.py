@@ -60,34 +60,19 @@ class DiffusionProcess:
                    f"timesteps={num_timesteps}, schedule={schedule}, "
                    f"beta_range=[{beta_start}, {beta_end}]")
     
-    def forward_diffusion(
-        self, 
-        x0: torch.Tensor, 
-        t: torch.Tensor, 
-        noise: Optional[torch.Tensor] = None
-    ) -> Tuple[torch.Tensor, torch.Tensor]:
+    def forward_diffusion(self, x0, t, noise=None, batch=None):
         """
-        Forward diffusion process: q(x_t | x_0)
-        
-        Args:
-            x0: 초기 원자 위치 [N, 3]
-            t: 시간 스텝 [B] (배치)
-            noise: 옵셔널 노이즈 [N, 3]
-            
-        Returns:
-            x_t: t 스텝에서의 노이즈 추가 위치 [N, 3]
-            noise: 사용된 노이즈 [N, 3]
+        x0: [total_nodes, 3]  # PyG batch
+        t: [batch_size]
+        batch: [total_nodes]
         """
+        device = x0.device
         if noise is None:
             noise = torch.randn_like(x0)
-        
-        # ᾱ_t 추출 (배치에 맞게)
-        sqrt_alphas_cumprod_t = self.extract(self.sqrt_alphas_cumprod, t, x0.shape)
-        sqrt_one_minus_alphas_cumprod_t = self.extract(self.sqrt_one_minus_alphas_cumprod, t, x0.shape)
-        
-        # x_t = √ᾱ_t * x_0 + √(1 - ᾱ_t) * ε
+        # Broadcast t to each node in batch
+        sqrt_alphas_cumprod_t = self.sqrt_alphas_cumprod[t][batch].unsqueeze(-1)  # [total_nodes, 1]
+        sqrt_one_minus_alphas_cumprod_t = self.sqrt_one_minus_alphas_cumprod[t][batch].unsqueeze(-1)  # [total_nodes, 1]
         x_t = sqrt_alphas_cumprod_t * x0 + sqrt_one_minus_alphas_cumprod_t * noise
-        
         return x_t, noise
     
     def extract(self, a: torch.Tensor, t: torch.Tensor, x_shape: torch.Size) -> torch.Tensor:
