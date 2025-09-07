@@ -103,13 +103,9 @@ class Trainer:
             
             data = data.to(self.device)
             
-            t = torch.randint(
-                0, self.diffusion.num_timesteps, (data.num_graphs,), 
-                device=self.device
-            ).long()
-            
+            t = torch.randint(0, self.diffusion.num_timesteps, (data.num_graphs,), device=data.pos.device)
             noisy_positions, noise = self.diffusion.forward_diffusion(
-                data.pos, t, noise=None
+                data.pos, t, noise=None, batch=data.batch
             )
 
             self.optimizer.zero_grad()
