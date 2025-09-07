@@ -89,6 +89,7 @@ def atoms_to_graph(
             x=x,
             edge_index=torch.tensor(edge_index, dtype=torch.long),
             edge_attr=torch.tensor(edge_attr, dtype=torch.float),
+            pos=torch.tensor(positions, dtype=torch.float),  # 반드시 포함!
             num_nodes=num_atoms
         )
         
