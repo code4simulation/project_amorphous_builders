@@ -104,6 +104,7 @@ class Trainer:
             data = data.to(self.device)
             
             t = torch.randint(0, self.diffusion.num_timesteps, (data.num_graphs,), device=data.pos.device)
+            t = t.float()
             noisy_positions, noise = self.diffusion.forward_diffusion(
                 data.pos, t, noise=None, batch=data.batch
             )
