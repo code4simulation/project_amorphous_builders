@@ -1,30 +1,30 @@
-mode: generate 
+mode: generate
 
 training:
-  device: 'cpu'
-
-data:
-  dataset_path: "amorphous_dataset.pt"  # 학습 데이터 경로
- 
+  device: cpu
 
 diffusion:
-  beta_start: 0.0001           # β 시작값
-  beta_end: 0.02             # β 종료값
-  num_timesteps: 1000        # Diffusion 스텝 수
-  schedule: "linear"         # β 스케줄 (linear 또는 cosine)
+  beta_start: 1e-4
+  beta_end: 0.02
+  num_timesteps: 1000
+  schedule: linear
 
 model:
-  node_dim: 3                # 노드 특징 차원 (x, y, z 좌표)
-  edge_dim: 1                # 에지 특징 차원 (거리)
-  hidden_dim: 128            # 은닉층 차원
-  num_layers: 6              # 그래프 컨볼루션 레이어 수
-  condition_dim: 100         # 조건(RDF) 특징 차원
+  node_dim: 3
+  edge_dim: 1
+  hidden_dim: 128
+  num_layers: 6
+  condition_dim: 100
 
 generate:
-  checkpoint: 'outputs/checkpoint_epoch_10.pt'
-  rdf: [0.1, 0.2, 0.3, 0.4]  #예시
-  lattice_vector: [[12, 0.0, 0.0], [0.0, 12, 0.0], [0.0, 0.0, 12]]
-  formula: 'Si'
-  n_atoms: 108
-  output_dir: 'results'
+  checkpoint: checkpoints/best_model.pt
+  target_rdf_npy: data/target_rdf.npy   # shape (M,2) columns: [r_bin (Å), g(r)]
+  lattice_vector: [[5.43,0,0],[0,5.43,0],[0,0,5.43]]
+  formula: "SiO2"
+  n_atoms: null                       # leave null to use density
+  density: 2.2                        # g/cm^3 used when n_atoms is null
+  output_dir: results
   denoise: true
+  rdf_guidance_weight: 1.0            # >0 enables guidance refinement
+  rdf_guidance_steps: 10
+  rdf_guidance_lr: 1e-3
