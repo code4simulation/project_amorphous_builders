@@ -1,2 +1,7 @@
 [Latent Diffusion Model] https://arxiv.org/abs/2112.10752
 [Diffusion model for generating amorphous Carbon] https://iopscience.iop.org/article/10.1088/2632-2153/ad8c10
+
+
+[Generative diffusion model for surface structure discovery] https://arxiv.org/abs/2402.17404
+[A Chemically-Guided Generative Diffusion Model forMaterials Synthesis Planning] https://openreview.net/pdf?id=hy39qxU6CQ
+[Conditional Image Synthesis with Diffusion Models:A Survey] https://arxiv.org/abs/2409.19365
