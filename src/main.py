@@ -6,6 +6,7 @@ import torch.nn.functional as F
 from torch.utils.data import DataLoader
 from torch.utils.tensorboard import SummaryWriter
 import numpy as np
+import sys
 import os
 import yaml
 from datetime import datetime
@@ -243,7 +244,7 @@ class Trainer:
 def main():
     """메인 학습 함수"""
     # 설정 파일 로드
-    config = load_config('input.yaml')
+    config = load_config(sys.argv[1])
     mode = config.get('mode')
 
     if not config.validate():
@@ -299,10 +300,57 @@ def main():
         trainer.train(train_loader, val_loader)
 
     elif mode == 'generate':
+        from data.dataset import AmorphousDataset
+        from torch_geometric.loader import DataLoader
+        from generate import generate_from_cond
+        from model.diffusion import DiffusionProcess, DiffusionSampler
+        from model.graph_network import ConditionalGraphNetwork
         dataset_path = config.get('data.dataset_path')
         dataset = AmorphousDataset.load(dataset_path)
-        # ...이하 생성 코드...
-
+    
+        device = config.get("training.device", "cpu")
+        # Diffusion process 초기화
+        diffusion_config = config.get("diffusion")
+        process = DiffusionProcess(
+                beta_start=float(diffusion_config["beta_start"]),
+                beta_end=float(diffusion_config["beta_end"]),
+                num_timesteps=diffusion_config["num_timesteps"],
+                schedule=diffusion_config["schedule"],
+        )
+    
+        # 모델 초기화 (구조는 config 기반)
+        model_config = config.get("model")
+        model = ConditionalGraphNetwork(
+                node_dim=model_config["node_dim"],
+                edge_dim=model_config["edge_dim"],
+                hidden_dim=model_config["hidden_dim"],
+                num_layers=model_config["num_layers"],
+                condition_dim=model_config["condition_dim"],
+        ).to(device)
+    
+        # 체크포인트 로드
+        ckpt_path = config.get("generate.checkpoint")
+        if ckpt_path is None or not os.path.exists(ckpt_path):
+            raise FileNotFoundError(f"[generate] checkpoint not found: {ckpt_path}")
+    
+        checkpoint = torch.load(ckpt_path, map_location=device)
+        model.load_state_dict(checkpoint["model_state_dict"])
+        model.eval()
+    
+        # 샘플러 생성
+        sampler = DiffusionSampler(process, model, device=device)
+    
+        # 구조 생성
+        generate_from_cond(
+                rdf=config.get("generate.rdf"),
+                lattice_vector=np.array(config.get("generate.lattice_vector")),
+                formula=config.get("generate.formula"),
+                n_atoms=config.get("generate.n_atoms"),
+                output_dir=config.get("generate.output_dir", "out"),
+                denoise=config.get("generate.denoise", True),
+                model=sampler,
+                model_kwargs={"n_atoms":config.get("generate.n_atoms"), "lattice_vector":np.array(config.get("generate.lattice_vector")), "n_steps": diffusion_config["num_timesteps"]},
+        )
     else:
         raise ValueError(f"Unknown mode: {mode}")
 
