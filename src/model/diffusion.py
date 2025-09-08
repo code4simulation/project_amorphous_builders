@@ -93,3 +93,85 @@ class DiffusionProcess:
         batch_size = t.shape[0]
         out = a.gather(-1, t.cpu())
         return out.reshape(batch_size, *((1,) * (len(x_shape) - 1))).to(t.device)
+
+class DiffusionSampler:
+    """
+    Reverse diffusion sampling loop using DiffusionProcess + ConditionalGraphNetwork.
+    """
+
+    def __init__(self, process: DiffusionProcess, model: nn.Module, device: str = "cpu"):
+        self.process = process
+        self.model = model.to(device)
+        self.device = device
+
+    @torch.no_grad()
+    def sample(
+        self,
+        cond: dict,
+        n_atoms: int,
+        lattice_vector: np.ndarray,
+        n_steps: Optional[int] = None,
+    ) -> Tuple[list[str], np.ndarray]:
+        """
+        Generate atomic positions from noise.
+
+        Args:
+            cond: dict with keys {"rdf": ndarray, "formula": str, "n_atoms": int}
+            n_atoms: number of atoms
+            lattice_vector: (3,3) numpy array
+            n_steps: number of diffusion steps (default: process.num_timesteps)
+
+        Returns:
+            elements: list[str]
+            positions: (N,3) ndarray
+        """
+        import sys, os
+        sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+        from generate import parse_formula
+
+        n_steps = n_steps or self.process.num_timesteps
+        betas = self.process.betas.to(self.device)
+        alphas = self.process.alphas.to(self.device)
+        alphas_cumprod = self.process.alphas_cumprod.to(self.device)
+
+        # 초기 노이즈 위치
+        x_t = torch.randn(n_atoms, 3, device=self.device)
+
+        # 조건 feature (RDF → torch tensor)
+        if isinstance(cond["rdf"], np.ndarray):
+            rdf_feat = torch.tensor(cond["rdf"], dtype=torch.float32, device=self.device)
+        else:
+            rdf_feat = torch.randn(100, device=self.device) # fallback
+
+        elements = parse_formula(cond["formula"], n_atoms)
+
+        batch = torch.zeros(n_atoms, dtype=torch.long, device=self.device)
+
+        for t in reversed(range(n_steps)):
+            t_tensor = torch.full((1,), t, dtype=torch.long, device=self.device)
+
+            # GNN을 통한 노이즈 예측
+            noise_pred = self.model(
+                x=x_t,
+                edge_index=torch.empty((2, 0), dtype=torch.long, device=self.device),
+                edge_attr=None,
+                t=t_tensor,
+                batch=batch,
+                condition=rdf_feat.unsqueeze(0), # [1, cond_dim]
+            )
+
+            beta_t = betas[t]
+            alpha_t = alphas[t]
+            alpha_cumprod_t = alphas_cumprod[t]
+
+            # x_{t-1} 샘플링
+            if t > 0:
+                noise = torch.randn_like(x_t)
+            else:
+                noise = torch.zeros_like(x_t)
+
+            coef1 = 1 / torch.sqrt(alpha_t)
+            coef2 = (1 - alpha_t) / torch.sqrt(1 - alpha_cumprod_t)
+            x_t = coef1 * (x_t - coef2 * noise_pred) + torch.sqrt(beta_t) * noise
+
+        return elements, x_t.cpu().numpy()
