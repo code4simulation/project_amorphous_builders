@@ -137,6 +137,15 @@ class DiffusionSampler:
         # 초기 노이즈 위치
         x_t = torch.randn(n_atoms, 3, device=self.device)
 
+        # inside reverse loop after computing x_t (torch tensor)
+        if target_rdf is not None and guidance_strength>0:
+            x_t.requires_grad_(True)
+            pred_g = differentiable_rdf(x_t, bins_t, sigma=some_sigma, lattice=lattice)
+            rdf_loss = F.mse_loss(pred_g, target_rdf_t)
+            grad = torch.autograd.grad(rdf_loss, x_t)[0]
+            x_t = x_t - guidance_step_size * grad  # small step towards reducing RDF loss
+            x_t = x_t.detach()
+
         # 조건 feature (RDF → torch tensor)
         if isinstance(cond["rdf"], np.ndarray):
             rdf_feat = torch.tensor(cond["rdf"], dtype=torch.float32, device=self.device)
