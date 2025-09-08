@@ -19,7 +19,7 @@ model:
 generate:
   checkpoint: checkpoints/best_model.pt
   target_rdf_npy: data/target_rdf.npy   # shape (M,2) columns: [r_bin (Å), g(r)]
-  lattice_vector: [[5.43,0,0],[0,5.43,0],[0,0,5.43]]
+  lattice_vector: [[13,0,0],[0,13,0],[0,0,13]]
   formula: "SiO2"
   n_atoms: null                       # leave null to use density
   density: 2.2                        # g/cm^3 used when n_atoms is null
