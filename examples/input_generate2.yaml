@@ -1,0 +1,8 @@
+density: 2.2                # g/cm3
+formula: "SiO2"
+lattice_vector:
+  - [10.0, 0.0, 0.0]
+  - [0.0, 10.0, 0.0]
+  - [0.0, 0.0, 10.0]
+target_rdf_path: "target_rdf.npy"
+output_path: "generated_structure.xyz"
