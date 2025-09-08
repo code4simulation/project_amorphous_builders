@@ -4,49 +4,88 @@ Generate module with target-RDF handling and optional gradient-guidance during s
 
 Expected target_rdf_npy format: numpy array shape (M,2) columns: [r_bin_center, g(r)]
 """
-import os
-import json
 import numpy as np
-from typing import Optional, Dict, Tuple
-from ase import Atoms
-from ase.io import write
 import torch
+import yaml
+from ase import Atoms
+from src.utils import rdf_utils
 
-from src.utils.rdf_utils import differentiable_rdf, estimate_n_atoms_from_density
-
-def load_target_rdf(npy_path: str) -> Tuple[np.ndarray, np.ndarray]:
-    arr = np.load(npy_path)
-    if arr.ndim != 2 or arr.shape[1] < 2:
-        raise ValueError("Target RDF npy must be shape (M,2) with columns [r_bin, g_r]")
-    bins = arr[:,0].astype(float)
-    rdf = arr[:,1].astype(float)
+def load_target_rdf(rdf_path):
+    """
+    npy 파일에서 target rdf (bin, rdf) 배열을 로드합니다.
+    """
+    arr = np.load(rdf_path)  # shape: (N, 2)
+    bins = arr[:,0]
+    rdf = arr[:,1]
     return bins, rdf
 
-def parse_formula(formula: str, n_atoms: int):
-    # simple parser for element assignment (fallback); keep in sync with project's style guide
-    import re
-    token_re = re.compile(r"([A-Z][a-z]*)(\d*)")
-    tokens = token_re.findall(formula)
-    if not tokens:
-        return ["X"] * n_atoms
-    parsed = []
-    total = 0
-    for el,num in tokens:
-        cnt = int(num) if num else 1
-        parsed.append((el,cnt))
-        total += cnt
-    elems = []
-    running = 0
-    for i,(el,cnt) in enumerate(parsed):
-        if i == len(parsed)-1:
-            n_el = n_atoms - running
-        else:
-            n_el = int(round(n_atoms * (cnt/total)))
-            running += n_el
-        elems.extend([el]*n_el)
-    if len(elems) < n_atoms:
-        elems.extend([parsed[0][0]]*(n_atoms-len(elems)))
-    return elems[:n_atoms]
+def parse_input_yaml(yaml_path):
+    """
+    input.yaml 파일에서 파라미터 로드
+    """
+    with open(yaml_path, "r") as f:
+        params = yaml.safe_load(f)
+    density = params["density"]
+    formula = params["formula"]
+    lattice_vector = params["lattice_vector"]
+    target_rdf_path = params["target_rdf_path"]
+    output_path = params.get("output_path", "generated_structure.xyz")
+    return density, formula, lattice_vector, target_rdf_path, output_path
+
+def initialize_atoms(n_atoms, elem_counts, lattice_vector):
+    """
+    원자수, 원소 개수, 격자벡터로 Atoms 객체 초기 생성
+    """
+    # 화학종 리스트 생성
+    symbols = []
+    for elem, count in elem_counts.items():
+        symbols.extend([elem]*count)
+    # 전체 원자수에 맞게 채움
+    while len(symbols) < n_atoms:
+        for elem in elem_counts:
+            if len(symbols) < n_atoms:
+                symbols.append(elem)
+    symbols = symbols[:n_atoms]
+    symbols = np.array(symbols)
+    # 임의 원자 좌표 생성
+    lattice_vec = np.array(lattice_vector)
+    positions = np.random.rand(n_atoms, 3) @ lattice_vec  # (n_atoms, 3)
+    atoms = Atoms(symbols=symbols, positions=positions, cell=lattice_vec, pbc=True)
+    return atoms
+
+def generate_structure(
+    density_g_cm3,
+    formula,
+    lattice_vector,
+    target_rdf_path,
+    model,
+    device='cpu',
+    output_path='generated_structure.xyz'
+):
+    """
+    density, formula, lattice_vector, target_rdf를 받아 모델을 통해 구조 생성, 결과 저장
+    """
+    bins, target_rdf = load_target_rdf(target_rdf_path)
+    n_atoms, elem_counts = rdf_utils.calculate_n_atoms(density_g_cm3, formula, lattice_vector)
+
+    atoms = initialize_atoms(n_atoms, elem_counts, lattice_vector)
+
+    # target RDF torch 텐서 변환
+    bins_t = torch.tensor(bins, dtype=torch.float32, device=device)
+    target_rdf_t = torch.tensor(target_rdf, dtype=torch.float32, device=device)
+
+    # 모델 샘플링
+    generated_atoms = model.generate(
+        initial_atoms=atoms,
+        target_bins=bins_t,
+        target_rdf=target_rdf_t,
+        lattice_vector=np.array(lattice_vector),
+        device=device
+    )
+
+    # ASE xyz 저장
+    generated_atoms.write(output_path, format='extxyz')
+    print(f"Generated structure saved: {output_path}")
 
 def generate_from_cond(
     target_rdf_npy: Optional[str],
@@ -156,3 +195,26 @@ def generate_from_cond(
     atoms.info["stage"] = "final"
     write(final_path, atoms, format="extxyz")
     return final_path, (denoise_path if denoise and target_rdf is not None else None)
+
+
+def main(input_yaml_path, model, device='cpu'):
+    density, formula, lattice_vector, target_rdf_path, output_path = parse_input_yaml(input_yaml_path)
+    generate_structure(
+        density_g_cm3=density,
+        formula=formula,
+        lattice_vector=lattice_vector,
+        target_rdf_path=target_rdf_path,
+        model=model,
+        device=device,
+        output_path=output_path
+    )
+
+if __name__ == "__main__":
+    import sys
+    # input.yaml 경로와 모델 (사용자 구현 필요)
+    yaml_path = sys.argv[1] if len(sys.argv) > 1 else "input.yaml"
+    # from src.model import load_model
+    # model = load_model(...)
+    model = ... # 실제 모델 객체로 교체 필요
+    device = "cuda" if torch.cuda.is_available() else "cpu"
+    main(yaml_path, model, device=device)
