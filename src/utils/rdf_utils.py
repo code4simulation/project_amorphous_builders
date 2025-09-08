@@ -83,240 +83,96 @@ def estimate_n_atoms_from_density(formula: str, density_gcm3: float, lattice_vec
         n_atoms = max(1, int(atoms_per_unit))
     return n_atoms
 
-
-def differentiable_rdf(
-    positions: torch.Tensor,
-    bin_centers: torch.Tensor,
+def differentiable_partial_rdf(
+    atoms,
+    elem1: str,
+    elem2: str,
+    rmax: float,
+    step: float,
     sigma: float = 0.1,
-    lattice: Optional[np.ndarray] = None,
     device: str = 'cpu'
 ) -> torch.Tensor:
     """
-    Compute a differentiable RDF g(r) using Gaussian kernels.
+    Gaussian 커널 기반 미분 가능한 Partial RDF (elem1-elem2) 계산 (PBC/MIC 지원).
 
     Args:
-        positions: (N,3) torch tensor (Å)
-        bin_centers: (M,) torch tensor centers (Å)
-        sigma: width of Gaussian kernel (Å)
-        lattice: optional (3,3) numpy array (Å) for PBC (minimum image)
-        device: torch device string
+        atoms: ASE Atoms 객체
+        elem1: 첫 번째 원소명 (예: 'Si')
+        elem2: 두 번째 원소명 (예: 'O')
+        rmax: RDF 최대 거리 (Å)
+        step: bin 간격 (Å)
+        sigma: Gaussian kernel 폭 (Å)
+        device: 계산 디바이스 ('cpu' 또는 'cuda')
 
     Returns:
-        g_r: (M,) torch tensor (same device)
-    Notes:
-        - Uses i<j pair counting (no double-counting)
-        - Normalization follows: g(r) ~ (2 * sum_kernel) / (N * rho * 4π r^2 dr)
-          with kernel integrated approximately by normalization factor sqrt(2π)*sigma.
+        torch.Tensor: (bin_centers,) 미분 가능한 partial RDF 값
     """
-    if not torch.is_tensor(positions):
-        positions = torch.tensor(positions, dtype=torch.float32, device=device)
-    else:
-        positions = positions.to(device=device, dtype=torch.float32)
-
-    bin_centers = bin_centers.to(device=device, dtype=torch.float32)
+    # positions, chemical symbols, cell/lattice 정보 추출
+    positions = np.asarray(atoms.get_positions(), dtype=np.float32)
+    symbols = np.asarray(atoms.get_chemical_symbols())
+    cell = np.asarray(atoms.get_cell())
     N = positions.shape[0]
-    if N < 2:
-        return torch.zeros_like(bin_centers, device=device)
+    pbc = getattr(atoms, 'pbc', [False, False, False])
 
-    # Apply minimum image convention if lattice provided
-    if lattice is not None:
-        lattice = np.asarray(lattice, dtype=float)
-        inv_lat = np.linalg.inv(lattice)
-        pos_np = positions.detach().cpu().numpy()
-        frac = (pos_np @ inv_lat.T)
-        frac = frac - np.round(frac)  # wrap to [-0.5,0.5]
-        pos_wrap = frac @ lattice.T
-        pos = torch.tensor(pos_wrap, dtype=positions.dtype, device=device)
+    # 대상 원소 인덱스
+    idx1 = np.where(symbols == elem1)[0]
+    idx2 = np.where(symbols == elem2)[0]
+    if len(idx1) == 0 or len(idx2) == 0:
+        return torch.zeros(int(rmax/step), device=device)
+
+    # bin 정의
+    bin_edges = np.arange(0, rmax+step, step)
+    bin_centers = (bin_edges[:-1] + bin_edges[1:]) / 2
+    bin_centers_t = torch.tensor(bin_centers, dtype=torch.float32, device=device)
+
+    # positions tensor
+    pos1 = torch.tensor(positions[idx1], dtype=torch.float32, device=device)  # (A,3)
+    pos2 = torch.tensor(positions[idx2], dtype=torch.float32, device=device)  # (B,3)
+    lattice = torch.tensor(cell, dtype=torch.float32, device=device)          # (3,3)
+    inv_lat = torch.linalg.inv(lattice)                                       # (3,3)
+    pbc_mask = torch.tensor(pbc, device=device, dtype=torch.bool)             # (3,)
+
+    # 쌍 간 차이 벡터 (broadcast)
+    dr = pos2.unsqueeze(0) - pos1.unsqueeze(1)  # (A,B,3)
+
+    # 차이 벡터를 분수 좌표로 변환
+    dfrac = torch.matmul(dr, inv_lat)  # (A,B,3)
+    # MIC [-0.5,0.5) 래핑(PBC축만)
+    if pbc_mask.any():
+        dfrac_wrapped = dfrac.clone()
+        for i in range(3):
+            if pbc_mask[i]:
+                dfrac_wrapped[..., i] -= torch.floor(dfrac_wrapped[..., i] + 0.5)
     else:
-        pos = positions
+        dfrac_wrapped = dfrac
+    # 다시 카테시안으로: 최소 영상 벡터
+    dr_mic = torch.matmul(dfrac_wrapped, lattice)  # (A,B,3)
 
-    # pairwise distances (i<j)
-    diff = pos.unsqueeze(1) - pos.unsqueeze(0)  # (N,N,3)
-    dists = torch.norm(diff, dim=-1)  # (N,N)
-    idx = torch.triu_indices(N, N, offset=1)
-    pair_dists = dists[idx[0], idx[1]]  # (P,)
+    # 거리 계산
+    pair_dists = torch.norm(dr_mic, dim=-1).flatten()  # (A*B,)
+    pair_dists = pair_dists[pair_dists > 1e-8]  # 자기 자신 제외
 
-    # constants
-    V_cell = 1.0
-    if lattice is not None:
-        V_cell = abs(np.linalg.det(np.array(lattice)))
-    rho = N / V_cell  # atoms per Å^3
+    if pair_dists.numel() == 0:
+        return torch.zeros_like(bin_centers_t, device=device)
 
-    r = bin_centers  # (M,)
-    if r.shape[0] > 1:
-        dr = float(r[1].item() - r[0].item())
-    else:
-        dr = 0.1
-
-    norm_factor = math.sqrt(2.0 * math.pi) * sigma  # approx integral of Gaussian
-
-    # kernel: shape (P, M)
-    diff_r = pair_dists.unsqueeze(1) - r.unsqueeze(0)  # (P, M)
+    # Gaussian kernel 적용 (미분 가능)
+    norm_factor = math.sqrt(2.0 * math.pi) * sigma
+    diff_r = pair_dists.unsqueeze(1) - bin_centers_t.unsqueeze(0)  # (P, M)
     kernel = torch.exp(-0.5 * (diff_r / sigma) ** 2) / norm_factor
 
-    # sum over pairs (each pair i<j counted once) -> multiply by 2 for i!=j summation convention
-    g_r_unnorm = kernel.sum(dim=0) * 2.0  # (M,)
+    # bin별 합산
+    prdf_unnorm = kernel.sum(dim=0)  # (M,)
 
-    denom = (N * rho * (4.0 * math.pi * (r ** 2) * dr)).to(device)
+    # 정규화 (volume, 원자수 등 고려)
+    volume = float(atoms.get_volume())
+    nA = len(idx1)
+    nB = len(idx2)
+    dr_val = float(step)
+    r = bin_centers_t
+
+    rho = nB / volume  # elem2의 밀도 (Å^-3)
+    denom = (nA * rho * (4.0 * math.pi * (r ** 2) * dr_val)).to(device)
     denom = torch.where(denom == 0, torch.ones_like(denom, device=device), denom)
-    g_r = g_r_unnorm / denom
-    return g_r
+    prdf = prdf_unnorm / denom
 
-
-class StructureAnalysis:
-    def __init__(self):
-        self.structure = None
-        self.cn_lim = [0, 10]
-        self.distance_matrices = {}
-        self.cache_dir = '__cache__'
-        self.filename = None
-
-    def load_structure(self, filename: str, file_format: str, **kwargs):
-        """
-        Load atomic structure from file.
-        
-        Args:
-            filename (str): Path to the input file.
-            file_format (str): Format of the input file ('vasp' or 'lammps-data').
-            **kwargs: Additional keyword arguments for ase.io.read function.
-        """
-        # Reinitialize the distance_matrix each time the structure is reloaded
-        self.distance_matrices.clear()
-        self.filename = Path(filename).stem
-        os.makedirs(self.cache_dir, exist_ok=True)
-        
-        if file_format not in ['vasp', 'lammps-data','extxyz']:
-            raise ValueError("Unsupported file format. Use 'vasp', 'lammps-data', or 'extxyz'.")
-        default_args = {
-            'vasp': {'index': None},
-            'lammps-data': {'index': None,
-                            'style': 'atomic'},
-            'extxyz': {'index': None},
-        }
-
-        # Merge default arguments with user-provided kwargs
-        read_args = {**default_args[file_format], **kwargs}
-        try:
-            self.structure = read(filename, format=file_format, **read_args)
-        except Exception as e:
-            raise IOError(f"Failed to load structure: {str(e)}")
-
-    def calculate_distance_matrix(self, atoms: ase.atoms.Atoms, idx: int = None):
-        if idx is None:
-            idx = 0
-        atoms_id = id(atoms)
-        cache_file = f"{self.cache_dir}/{self.filename}_structure_{idx}.npy"
-        if atoms_id in self.distance_matrices:
-            return self.distance_matrices[atoms_id]
-
-        global_dist = None
-        if rank == 0:
-            if os.path.exists(cache_file):
-                global_dist = np.load(cache_file)
-                print(f"Loaded from cache: {cache_file}")
-        global_dist = comm.bcast(global_dist, root=0)
-        if global_dist is not None:
-            self.distance_matrices[atoms_id] = global_dist
-            return global_dist
-        
-        nions = atoms.get_global_number_of_atoms()
-        local_nions = nions // size
-        start = rank * local_nions
-        end = nions if rank == size - 1 else (rank + 1) * local_nions
-        local_dist = np.zeros((end - start, nions))
-        for i in range(start, end):
-            local_dist[i - start, i:nions] = atoms.get_distances(i, range(i, nions), mic=True)
-        local_size = local_dist.size
-        sizes = comm.allgather(local_size)
-        global_size = sum(sizes)
-        displacements = [sum(sizes[:i]) for i in range(size)]
-        global_dist = np.zeros(global_size).reshape([-1, local_dist.shape[1]])
-        comm.Allgatherv(sendbuf=local_dist, recvbuf=(global_dist, sizes, displacements, MPI.DOUBLE))
-        global_dist += global_dist.T - np.diag(np.diag(global_dist))
-        np.fill_diagonal(global_dist, np.inf)
-        
-        if rank == 0:
-            np.save(cache_file, global_dist)
-            print(f"Saved to cache: {cache_file}")
-        self.distance_matrices[atoms_id] = global_dist
-        return global_dist
-    
-    def calculate_single_rdf(self, atoms: ase.atoms.Atoms, rmax: float, cutoff: float, dr: float, idx: int = None):
-        distance_matrix = self.calculate_distance_matrix(atoms, idx)
-        bins = np.arange(dr / 2, rmax + dr / 2, dr)
-        rdf = np.zeros(len(bins) - 1)
-        if rmax > atoms.get_cell().diagonal().min() / 2:
-            print('WARNING: The input maximum radius is over the half the smallest cell dimension.')
-        global_dist = distance_matrix
-        nions = atoms.get_global_number_of_atoms()
-        res, bin_edges = np.histogram(global_dist, bins=bins)
-        rdf += res / ((nions ** 2 / atoms.get_volume()) * 4 * np.pi * dr * bin_edges[:-1] ** 2)
-        coordination_numbers = np.sum(global_dist < cutoff, axis=1)
-        return rdf, bin_edges, coordination_numbers
-
-    def calculate_rdf(self, rmax, cutoff=2.0, dr=0.02):
-        bins = np.arange(dr / 2, rmax + dr / 2, dr)
-        if isinstance(self.structure[0], ase.atom.Atom):
-            rdf, bin_edges, coordination_numbers = self.calculate_single_rdf(self.structure, rmax, cutoff, dr)
-        elif isinstance(self.structure[0], ase.atoms.Atoms):
-            nimg = len(self.structure)
-            rdf = np.zeros(len(bins) - 1)
-            for idx, atoms in enumerate(self.structure):
-                if idx == 0: 
-                    nions = atoms.get_global_number_of_atoms()
-                    coordination_numbers = np.zeros(nimg*nions)
-                single_rdf, bin_edges, single_coordination_numbers = self.calculate_single_rdf(atoms, rmax, cutoff, dr, idx=idx)
-                rdf += single_rdf
-                coordination_numbers[idx*nions: (idx+1)*nions] = single_coordination_numbers
-            rdf /= nimg
-        coordination_numbers = coordination_numbers.astype(int)
-        min_cn, max_cn = self.cn_lim[0], self.cn_lim[1]
-        cn_counts = np.bincount(coordination_numbers, minlength=max_cn - min_cn + 1)
-        if np.max(coordination_numbers) > max_cn:
-            print(f"WARNING: Some CN > {max_cn}, not included in distribution.")
-        cn_labels = np.arange(min_cn, max_cn + 1)
-        cn_sum = np.sum(cn_counts)
-        return np.column_stack((bin_edges[:-1], rdf)), np.column_stack((cn_labels, cn_counts, cn_counts / cn_sum if cn_sum > 0 else cn_counts))
-
-    def calculate_single_prdf(self, atoms: ase.atoms.Atoms, targets: tuple, rmax: float, cutoff: float, dr: float, idx: int = None):
-        distance_matrix = self.calculate_distance_matrix(atoms, idx)
-        (elemA, elemB) = targets
-        bins = np.arange(dr / 2, rmax + dr / 2, dr)
-        prdf = np.zeros(len(bins) - 1)
-        if rmax > atoms.get_cell().diagonal().min() / 2:
-            print('WARNING: The input maximum radius is over the half the smallest cell dimension.')
-        sym = np.array(atoms.get_chemical_symbols())
-        idA = np.where( sym == elemA )[0]
-        nelemA = len(idA)
-        idB = np.where( sym == elemB )[0]
-        nelemB = len(idB)
-        global_dist = distance_matrix[idA][:, idB]
-        res, bin_edges = np.histogram(global_dist, bins=bins)
-        prdf += res / (nelemA * nelemB / atoms.get_volume() * 4 * np.pi * dr * bin_edges[:-1] ** 2)
-        coordination_numbers = np.sum(global_dist < cutoff, axis=1)
-        return prdf, bin_edges, coordination_numbers
-
-    def calculate_prdf(self, targets:tuple, rmax:float, cutoff:float=2.0, dr:float=0.02):
-        bins = np.arange(dr / 2, rmax + dr / 2, dr)
-        if isinstance(self.structure[0], ase.atom.Atom):
-            prdf, bin_edges, coordination_numbers = self.calculate_single_prdf(self.structure, targets, rmax, cutoff, dr)
-        elif isinstance(self.structure[0], ase.atoms.Atoms):
-            nimg = len(self.structure)
-            prdf = np.zeros(len(bins) - 1)
-            for idx, atoms in enumerate(self.structure):
-                if idx == 0: 
-                    sym = np.array(atoms.get_chemical_symbols())
-                    nions = len(np.where( sym == elemA )[0])
-                    coordination_numbers = np.zeros(nimg*nions)
-                single_prdf, bin_edges, single_coordination_numbers = self.calculate_single_prdf(atoms, targets, rmax, cutoff, dr, idx=idx)
-                prdf += single_prdf
-                coordination_numbers[idx*nions: (idx+1)*nions] = single_coordination_numbers
-            prdf /= nimg
-        coordination_numbers = coordination_numbers.astype(int)
-        min_cn, max_cn = self.cn_lim[0], self.cn_lim[1]
-        cn_counts = np.bincount(coordination_numbers, minlength=max_cn - min_cn + 1)
-        if np.max(coordination_numbers) > max_cn:
-            print(f"WARNING: Some CN > {max_cn}, not included in distribution.")
-        cn_labels = np.arange(min_cn, max_cn + 1)
-        cn_sum = np.sum(cn_counts)
-        return np.column_stack((bin_edges[:-1], prdf)), np.column_stack((cn_labels, cn_counts, cn_counts / cn_sum if cn_sum > 0 else cn_counts))
+    return prdf
