@@ -8,7 +8,6 @@ import torch.nn as nn
 import torch.nn.functional as F
 from torch_geometric.data import Data
 from torch_geometric.nn import MessagePassing, global_mean_pool
-from torch_geometric.utils import add_self_loops, degree
 from torch.utils.data import Dataset, DataLoader
 from ase import Atoms
 from ase.io import read, write
