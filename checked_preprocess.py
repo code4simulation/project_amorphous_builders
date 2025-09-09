@@ -214,8 +214,13 @@ def atoms_to_graph(
         positions = atoms.positions
         num_atoms = len(atoms)
         
-        # 거리 행렬 계산
-        dist_matrix = np.linalg.norm(positions[:, None, :] - positions[None, :, :], axis=-1)
+        # PBC를 고려한 거리 행렬 계산
+        if np.any(atoms.pbc) and atoms.cell.rank == 3:
+            # 주기성 경계 조건 적용
+            _, dist_matrix = get_distances(positions, positions, cell=atoms.cell, pbc=atoms.pbc)
+        else:
+            # 비주기성 시스템
+            dist_matrix = np.linalg.norm(positions[:, None, :] - positions[None, :, :], axis=-1)
         
         # cutoff 내의 에지 필터링
         edge_mask = (dist_matrix > 0) & (dist_matrix <= graph_cutoff)
