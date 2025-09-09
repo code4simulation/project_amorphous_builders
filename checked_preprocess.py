@@ -13,8 +13,6 @@ from torch.utils.data import Dataset, DataLoader
 from ase import Atoms
 from ase.io import read, write
 from ase.geometry import get_distances
-import random
-import matplotlib.pyplot as plt
 from typing import Dict, List, Tuple, Optional, Any
 
 logging.basicConfig(
