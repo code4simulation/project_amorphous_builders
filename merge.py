@@ -33,6 +33,52 @@ import matplotlib.pyplot as plt
 from typing import Dict, List, Tuple, Optional
 
 # ==============================================================================
+# --- SECTION: MAIN EXECUTION (from src/main.py) ---
+# ==============================================================================
+def main():
+    config = load_config(sys.argv[1])
+    mode = config.get('mode')
+
+    if not config.validate():
+        raise RuntimeError("Config validation failed")
+
+    # using logging 
+    device = "cuda" if torch.cuda.is_available() else "cpu"
+    #print(f"사용 디바이스: {device}")
+
+    if args.mode == 'preprocess':
+        extxyz_path = config.get('data.extxyz_path')
+        dataset_path = config.get('data.dataset_path')
+        graph_cutoff = config.get('data.graph_cutoff', 5.0)
+        r_max = config.get('data.r_max', 10.0)
+        n_bins = config.get('data.n_bins', 100)
+        normalize_rdf = config.get('data.normalize_rdf', True)
+
+        structures = load_extxyz(extxyz_path)
+        dataset = create_dataset_from_structures(
+            structures,
+            graph_cutoff=graph_cutoff,
+            r_max=r_max,
+            n_bins=n_bins,
+            normalize_rdf=normalize_rdf
+        )
+        dataset.save(dataset_path)
+        print(f"Preprocessing complete: saved to {dataset_path}")
+        return
+
+    elif mode == 'train':
+        atoms_list = load_atomic_data(config['data']['train_path'])
+        if not atoms_list: return
+        
+        preprocessed_data = preprocess_data(atoms_list, normalize=True)
+        dataset = AtomicStructureDataset(preprocessed_data)
+        
+        train_model(config, diffusion_model, dataset)
+        
+    elif mode == 'generate':
+        generate_structures(config, diffusion_model)
+
+# ==============================================================================
 # --- SECTION: UTILS (from src/utils/) ---
 # ==============================================================================
 # --- from src/utils/config.py ---
@@ -73,7 +119,12 @@ class Config:
     def validate(self) -> bool:
         required_keys = []
         mode = self.get('mode')
-        if mode == 'train':
+        if mode == 'preprocess':
+            required_keys = [
+                'data.extxyz_path',
+                'data.dataset_path'
+            ]
+        elif mode == 'train':
             required_keys = [
                 'data.dataset_path',
                 'model.node_dim',
@@ -87,11 +138,7 @@ class Config:
                 'model.node_dim',
                 'model.hidden_dim',
             ]
-        elif mode == 'preprocess':
-            required_keys = [
-                'data.extxyz_path',
-                'data.dataset_path'
-            ]
+
         missing_keys = []
         for key in required_keys:
             if self.get(key) is None:
@@ -122,7 +169,7 @@ class Config:
         return yaml.dump(self.config, default_flow_style=False)
 
 def load_config(config_path: str) -> Config:
-    return Config(config_path
+    return Config(config_path)
 
 # --- from src/utils/rdf_utils.py ---
 def _parse_formula(formula: str) -> List[Tuple[str, int]]:
@@ -136,7 +183,6 @@ def _parse_formula(formula: str) -> List[Tuple[str, int]]:
         cnt = int(num) if num else 1
         parsed.append((el, cnt))
     return parsed
-
 
 def estimate_molar_mass(formula: str) -> float:
     """
@@ -1226,50 +1272,5 @@ def generate_structures(config: Dict, diffusion_model: DiffusionModel) -> List[A
     """ code... """
     return generated_atoms_list
 
-# ==============================================================================
-# --- SECTION: MAIN EXECUTION (from src/main.py) ---
-# ==============================================================================
-def main():
-    config = load_config(sys.argv[1])
-    mode = config.get('mode')
-
-    if not config.validate():
-        raise RuntimeError("Config validation failed")
-
-    # using logging 
-    device = "cuda" if torch.cuda.is_available() else "cpu"
-    #print(f"사용 디바이스: {device}")
-
-    if args.mode == 'preprocess':
-        extxyz_path = config.get('data.extxyz_path')
-        dataset_path = config.get('data.dataset_path')
-        graph_cutoff = config.get('data.graph_cutoff', 5.0)
-        r_max = config.get('data.r_max', 10.0)
-        n_bins = config.get('data.n_bins', 100)
-        normalize_rdf = config.get('data.normalize_rdf', True)
-
-        structures = load_extxyz(extxyz_path)
-        dataset = create_dataset_from_structures(
-            structures,
-            graph_cutoff=graph_cutoff,
-            r_max=r_max,
-            n_bins=n_bins,
-            normalize_rdf=normalize_rdf
-        )
-        dataset.save(dataset_path)
-        print(f"Preprocessing complete: saved to {dataset_path}")
-        return
-
-    elif args.mode == 'train':
-        atoms_list = load_atomic_data(config['data']['train_path'])
-        if not atoms_list: return
-        
-        preprocessed_data = preprocess_data(atoms_list, normalize=True)
-        dataset = AtomicStructureDataset(preprocessed_data)
-        
-        train_model(config, diffusion_model, dataset)
-        
-    elif args.mode == 'generate':
-        generate_structures(config, diffusion_model)
 if __name__ == '__main__':
     main()
